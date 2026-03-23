@@ -1,0 +1,16 @@
+aws_region = "eu-central-1"
+
+management_role_arn      = "arn:aws:iam::111111111111:role/OrganizationAccountAccessRole"
+
+account_emails = {
+  audit           = "aws-audit@example.com"
+  log_archive     = "aws-log-archive@example.com"
+  shared_services = "aws-shared-services@example.com"
+  dev             = "aws-dev@example.com"
+  staging         = "aws-staging@example.com"
+  prod            = "aws-prod@example.com"
+}
+
+project_name   = "tower-abac"
+cost_center    = "platform"
+workload_owner = "platform-team"

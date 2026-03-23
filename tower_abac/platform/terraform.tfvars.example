@@ -1,0 +1,31 @@
+aws_region = "eu-central-1"
+
+management_role_arn       = "arn:aws:iam::111111111111:role/OrganizationAccountAccessRole"
+management_account_id     = "111111111111"
+audit_role_arn            = "arn:aws:iam::222222222222:role/OrganizationAccountAccessRole"
+log_archive_role_arn      = "arn:aws:iam::333333333333:role/OrganizationAccountAccessRole"
+shared_services_role_arn  = "arn:aws:iam::444444444444:role/OrganizationAccountAccessRole"
+workload_dev_role_arn     = "arn:aws:iam::555555555555:role/OrganizationAccountAccessRole"
+workload_staging_role_arn = "arn:aws:iam::666666666666:role/OrganizationAccountAccessRole"
+workload_prod_role_arn    = "arn:aws:iam::777777777777:role/OrganizationAccountAccessRole"
+
+organization_id = "o-xxxxxxxxxx"
+
+account_ids = {
+  audit           = "222222222222"
+  log_archive     = "333333333333"
+  shared_services = "444444444444"
+  dev             = "555555555555"
+  staging         = "666666666666"
+  prod            = "777777777777"
+}
+
+identity_center_groups = {
+  platform_admins = "PlatformAdmins"
+  developers      = "Developers"
+  auditors        = "Auditors"
+}
+
+project_name   = "tower-abac"
+cost_center    = "platform"
+workload_owner = "platform-team"
