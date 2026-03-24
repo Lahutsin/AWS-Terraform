@@ -2,6 +2,8 @@
 
 This stack is an expanded Terraform implementation of the hybrid serverless architecture shown in the attached diagram.
 
+![Lambda Hybrid 10K RPS architecture](scheme/lambda_hybrid_10K_PRS.png)
+
 Implemented request paths:
 
 - sync path: `Route 53 -> CloudFront -> WAF -> API Gateway -> Lambda -> DynamoDB/S3`
