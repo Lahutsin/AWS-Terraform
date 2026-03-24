@@ -1,0 +1,13 @@
+version: 0.2
+
+phases:
+  install:
+    commands:
+      - sam --version
+  build:
+    commands:
+      - sam build --template-file sam/template.yaml
+      - sam package --s3-bucket "$ARTIFACT_BUCKET" --template-file .aws-sam/build/template.yaml --output-template-file packaged.yaml
+artifacts:
+  files:
+    - packaged.yaml
