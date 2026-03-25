@@ -1,0 +1,96 @@
+aws_region   = "eu-central-1"
+project_name = "lambda-hybrid-50k"
+environment  = "dev"
+
+api_name       = "lambda-hybrid-50k-api"
+api_stage_name = "v1"
+
+sync_route_path     = "/sync"
+buffer_route_path   = "/async"
+priority_route_path = "/async/priority"
+bulk_route_path     = "/async/bulk"
+
+api_throttling_burst_limit   = 10000
+api_throttling_rate_limit    = 5000
+api_detailed_metrics_enabled = true
+
+sync_lambda_memory_size   = 1024
+sync_lambda_timeout       = 10
+worker_lambda_memory_size = 1024
+worker_lambda_timeout     = 60
+
+sync_reserved_concurrency    = 150
+sync_provisioned_concurrency = 40
+
+worker_reserved_concurrency               = 250
+worker_provisioned_concurrency            = 40
+worker_batch_size                         = 10
+worker_maximum_batching_window_in_seconds = 5
+worker_maximum_concurrency                = 150
+
+queue_visibility_timeout_seconds = 300
+queue_message_retention_seconds  = 345600
+dlq_message_retention_seconds    = 1209600
+max_receive_count                = 5
+
+enable_priority_lane = true
+enable_bulk_lane     = true
+
+log_retention_in_days = 14
+
+enable_xray                  = true
+enable_cloudwatch_dashboard  = true
+enable_customer_managed_kms  = false
+enable_dynamodb_stream       = true
+enable_point_in_time_recovery = true
+
+lambda_errors_alarm_threshold         = 1
+lambda_throttles_alarm_threshold      = 1
+api_5xx_alarm_threshold               = 1
+dlq_visible_messages_alarm_threshold  = 1
+queue_visible_messages_alarm_threshold = 100
+queue_oldest_message_alarm_threshold   = 60
+alarm_period_seconds                  = 60
+alarm_evaluation_periods              = 1
+enable_alarm_notifications            = true
+alarm_notification_email_endpoints    = ["alerts@example.com"]
+
+enable_edge_layer        = true
+enable_waf               = true
+enable_cloudfront_logging = true
+enable_waf_logging       = true
+route53_zone_name        = "example.com"
+edge_domain_name         = "api.example.com"
+cloudfront_price_class   = "PriceClass_100"
+cloudfront_default_ttl   = 60
+cloudfront_max_ttl       = 300
+cloudfront_min_ttl       = 0
+enable_origin_shield     = true
+origin_shield_region     = "eu-central-1"
+waf_rate_limit           = 20000
+
+enable_alb_ingress     = false
+alb_subnet_ids         = ["subnet-aaaa1111", "subnet-bbbb2222"]
+alb_security_group_ids = ["sg-0123456789abcdef0"]
+# alb_certificate_arn   = "arn:aws:acm:eu-central-1:111111111111:certificate/xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+
+cicd_enabled                        = true
+cicd_connection_arn                = "arn:aws:codestar-connections:eu-central-1:111111111111:connection/xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+cicd_repository_id                 = "owner/repository"
+cicd_branch_name                   = "main"
+# cicd_artifact_bucket_name_override = "my-unique-artifact-bucket"
+cicd_stack_name                    = "lambda-hybrid-sam"
+
+enable_async_sns_topic     = true
+enable_eventbridge_ingress = true
+async_eventbridge_source   = "custom.lambda-hybrid"
+async_eventbridge_detail_type = "async-request"
+
+cost_center         = "application"
+owner               = "platform-team"
+data_classification = "internal"
+
+# s3_bucket_name_override       = "my-globally-unique-bucket-name"
+# cloudfront_log_bucket_name_override = "my-unique-cloudfront-log-bucket"
+# dynamodb_table_name_override  = "my-request-table"
+# s3_bucket_force_destroy       = true

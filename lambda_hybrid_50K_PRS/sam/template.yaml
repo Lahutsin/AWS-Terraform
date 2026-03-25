@@ -1,0 +1,296 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: SAM deployment template for the 50K hybrid Lambda architecture.
+
+Parameters:
+  Environment:
+    Type: String
+    Default: dev
+  ProjectName:
+    Type: String
+    Default: lambda-hybrid-50k
+  SyncRoutePath:
+    Type: String
+    Default: /sync
+  BufferRoutePath:
+    Type: String
+    Default: /async
+  PriorityRoutePath:
+    Type: String
+    Default: /async/priority
+  BulkRoutePath:
+    Type: String
+    Default: /async/bulk
+  LogRetentionInDays:
+    Type: Number
+    Default: 14
+  SyncMemorySize:
+    Type: Number
+    Default: 1024
+  SyncTimeout:
+    Type: Number
+    Default: 10
+  WorkerMemorySize:
+    Type: Number
+    Default: 1024
+  WorkerTimeout:
+    Type: Number
+    Default: 60
+  WorkerBatchSize:
+    Type: Number
+    Default: 10
+  QueueVisibilityTimeout:
+    Type: Number
+    Default: 300
+  QueueMaxReceiveCount:
+    Type: Number
+    Default: 5
+
+Globals:
+  Function:
+    Runtime: python3.12
+    Tracing: Active
+    Architectures:
+      - arm64
+    Environment:
+      Variables:
+        REQUESTS_TABLE: !Ref RequestsTable
+        PAYLOAD_BUCKET: !Ref PayloadBucket
+        STACK_NAME: !Sub ${ProjectName}-${Environment}
+
+Resources:
+  HttpApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      StageName: v1
+
+  PayloadBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      VersioningConfiguration:
+        Status: Enabled
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+  RequestsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      StreamSpecification:
+        StreamViewType: NEW_AND_OLD_IMAGES
+      AttributeDefinitions:
+        - AttributeName: id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: id
+          KeyType: HASH
+
+  AsyncDeadLetterQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub ${ProjectName}-${Environment}-dlq
+
+  BufferQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub ${ProjectName}-${Environment}-buffer
+      VisibilityTimeout: !Ref QueueVisibilityTimeout
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt AsyncDeadLetterQueue.Arn
+        maxReceiveCount: !Ref QueueMaxReceiveCount
+
+  PriorityQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub ${ProjectName}-${Environment}-priority
+      VisibilityTimeout: !Ref QueueVisibilityTimeout
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt AsyncDeadLetterQueue.Arn
+        maxReceiveCount: !Ref QueueMaxReceiveCount
+
+  BulkQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub ${ProjectName}-${Environment}-bulk
+      VisibilityTimeout: !Ref QueueVisibilityTimeout
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt AsyncDeadLetterQueue.Arn
+        maxReceiveCount: !Ref QueueMaxReceiveCount
+
+  SyncFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub ${ProjectName}-${Environment}-sync
+      CodeUri: ../src/
+      Handler: sync_handler.handler
+      MemorySize: !Ref SyncMemorySize
+      Timeout: !Ref SyncTimeout
+      Policies:
+        - S3CrudPolicy:
+            BucketName: !Ref PayloadBucket
+        - DynamoDBCrudPolicy:
+            TableName: !Ref RequestsTable
+      Events:
+        SyncRequest:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: !Ref SyncRoutePath
+            Method: POST
+
+  WorkerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub ${ProjectName}-${Environment}-worker
+      CodeUri: ../src/
+      Handler: worker_handler.handler
+      MemorySize: !Ref WorkerMemorySize
+      Timeout: !Ref WorkerTimeout
+      Policies:
+        - S3CrudPolicy:
+            BucketName: !Ref PayloadBucket
+        - DynamoDBCrudPolicy:
+            TableName: !Ref RequestsTable
+        - SQSPollerPolicy:
+            QueueName: !GetAtt BufferQueue.QueueName
+        - SQSPollerPolicy:
+            QueueName: !GetAtt PriorityQueue.QueueName
+        - SQSPollerPolicy:
+            QueueName: !GetAtt BulkQueue.QueueName
+      Events:
+        BufferQueueEvent:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt BufferQueue.Arn
+            BatchSize: !Ref WorkerBatchSize
+            FunctionResponseTypes:
+              - ReportBatchItemFailures
+        PriorityQueueEvent:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt PriorityQueue.Arn
+            BatchSize: !Ref WorkerBatchSize
+            FunctionResponseTypes:
+              - ReportBatchItemFailures
+        BulkQueueEvent:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt BulkQueue.Arn
+            BatchSize: !Ref WorkerBatchSize
+            FunctionResponseTypes:
+              - ReportBatchItemFailures
+
+  ApiGatewayToSqsRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: apigateway.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: SendMessageToAsyncQueues
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - sqs:SendMessage
+                Resource:
+                  - !GetAtt BufferQueue.Arn
+                  - !GetAtt PriorityQueue.Arn
+                  - !GetAtt BulkQueue.Arn
+
+  BufferQueueIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref HttpApi
+      CredentialsArn: !GetAtt ApiGatewayToSqsRole.Arn
+      Description: Send API requests to the buffer queue for async processing
+      IntegrationSubtype: SQS-SendMessage
+      IntegrationType: AWS_PROXY
+      PayloadFormatVersion: '1.0'
+      RequestParameters:
+        MessageBody: $request.body
+        QueueUrl: !Ref BufferQueue
+
+  PriorityQueueIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref HttpApi
+      CredentialsArn: !GetAtt ApiGatewayToSqsRole.Arn
+      Description: Send API requests to the priority queue
+      IntegrationSubtype: SQS-SendMessage
+      IntegrationType: AWS_PROXY
+      PayloadFormatVersion: '1.0'
+      RequestParameters:
+        MessageBody: $request.body
+        QueueUrl: !Ref PriorityQueue
+
+  BulkQueueIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref HttpApi
+      CredentialsArn: !GetAtt ApiGatewayToSqsRole.Arn
+      Description: Send API requests to the bulk queue
+      IntegrationSubtype: SQS-SendMessage
+      IntegrationType: AWS_PROXY
+      PayloadFormatVersion: '1.0'
+      RequestParameters:
+        MessageBody: $request.body
+        QueueUrl: !Ref BulkQueue
+
+  BufferQueueRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref HttpApi
+      RouteKey: !Sub POST ${BufferRoutePath}
+      Target: !Sub integrations/${BufferQueueIntegration}
+
+  PriorityQueueRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref HttpApi
+      RouteKey: !Sub POST ${PriorityRoutePath}
+      Target: !Sub integrations/${PriorityQueueIntegration}
+
+  BulkQueueRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref HttpApi
+      RouteKey: !Sub POST ${BulkRoutePath}
+      Target: !Sub integrations/${BulkQueueIntegration}
+
+  SyncLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${ProjectName}-${Environment}-sync
+      RetentionInDays: !Ref LogRetentionInDays
+
+  WorkerLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${ProjectName}-${Environment}-worker
+      RetentionInDays: !Ref LogRetentionInDays
+
+Outputs:
+  HttpApiUrl:
+    Description: Base URL of the SAM-deployed HTTP API.
+    Value: !Sub https://${HttpApi}.execute-api.${AWS::Region}.amazonaws.com/v1
+  SyncInvokeUrl:
+    Description: Sync route URL.
+    Value: !Sub https://${HttpApi}.execute-api.${AWS::Region}.amazonaws.com/v1${SyncRoutePath}
+  BufferInvokeUrl:
+    Description: Buffered async route URL.
+    Value: !Sub https://${HttpApi}.execute-api.${AWS::Region}.amazonaws.com/v1${BufferRoutePath}
+  PriorityInvokeUrl:
+    Description: Priority async route URL.
+    Value: !Sub https://${HttpApi}.execute-api.${AWS::Region}.amazonaws.com/v1${PriorityRoutePath}
+  BulkInvokeUrl:
+    Description: Bulk async route URL.
+    Value: !Sub https://${HttpApi}.execute-api.${AWS::Region}.amazonaws.com/v1${BulkRoutePath}
